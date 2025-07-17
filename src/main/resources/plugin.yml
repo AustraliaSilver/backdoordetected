@@ -1,0 +1,8 @@
+name: Backdoordetected
+version: 1.0
+main: backdoor.detect.backdoordetected.Backdoordetected
+api-version: 1.21
+commands:
+  bdd:
+    description: Backdoor detection command
+    usage: /<command> track
