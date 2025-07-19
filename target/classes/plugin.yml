@@ -1,0 +1,13 @@
+name: Backdoordetected
+main: backdoor.detect.backdoordetected.Backdoordetected
+version: 1.1
+api-version: 1.21
+authors: [australia1_]
+Description:  Best Backdoor detected plugin
+commands:
+  bdd:
+    usage: /bdd [gui|track]
+    permission: backdoordetected.use
+permissions:
+  backdoordetected.use:
+    default: op

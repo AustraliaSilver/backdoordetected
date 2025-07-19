@@ -1,0 +1,4 @@
+backdoor\detect\backdoordetected\GuiManager.class
+backdoor\detect\backdoordetected\PluginWorker.class
+backdoor\detect\backdoordetected\BddCommandExecutor.class
+backdoor\detect\backdoordetected\Backdoordetected.class

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backdoor Detector with Puter.js</title>
+    <script src="https://js.puter.com/v2/"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 20px auto; 
+            padding: 20px; 
+            background: #f5f5f5;
+        }
+        h1 { color: #333; }
+        #jarFileInput { 
+            margin: 10px 0; 
+            padding: 5px; 
+        }
+        #analyzeButton { 
+            padding: 10px 20px; 
+            background: #0066cc; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 16px; 
+        }
+        #analyzeButton:hover { background: #0055aa; }
+        #output { 
+            margin-top: 20px; 
+            padding: 15px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            background: white; 
+            min-height: 200px; 
+            white-space: pre-wrap; 
+            font-family: monospace; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Backdoor Detector</h1>
+    <input type="file" id="jarFileInput" accept=".jar">
+    <button id="analyzeButton" onclick="processJar()">Analyze JAR</button>
+    <div id="output">Select a JAR file to analyze.</div>
+
+    <script>
+        // Check if Puter.js is loaded
+        if (!window.puter) {
+            document.getElementById("output").innerText = "Failed to load Puter.js SDK.";
+            console.error("Puter.js SDK not loaded.");
+        } else {
+            console.log("Puter.js loaded successfully");
+            document.getElementById("output").innerText = "Puter.js ready. Select a JAR file to analyze.";
+        }
+
+        async function uploadJarFile(file, outputDiv) {
+            if (!puter.fs || typeof puter.fs.write !== 'function') {
+                throw new Error("Puter.js filesystem API is not available.");
+            }
+            const arrayBuffer = await file.arrayBuffer();
+            const filePath = `/tmp/${file.name}`;
+            await puter.fs.write(filePath, new Uint8Array(arrayBuffer));
+            outputDiv.innerText += `\nUploaded to: ${filePath}`;
+            return filePath;
+        }
+
+        async function decompileJar(filePath, outputDiv) {
+            const response = await fetch('http://localhost:8080/decompile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jarPath: filePath })
+            });
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(result.error);
+            }
+            outputDiv.innerText += `\nDecompiled ${result.javaFiles.length} Java files.`;
+            return result;
+        }
+
+        async function analyzeWithGrok(javaFiles, outputDiv) {
+            let hasBackdoor = false;
+            for (const javaFile of javaFiles) {
+                try {
+                    const content = await puter.fs.read(javaFile).then(blob => blob.text());
+                    const prompt = `Bạn là Grok, một trợ lý AI thông minh cao được giao nhiệm vụ phân tích mã Java để tìm kiếm các backdoor. Hãy xem xét mã sau và xác định xem nó có chứa hành vi độc hại hoặc đáng ngờ không. Trả về 'Yes' nếu phát hiện backdoor, hoặc 'No' nếu không có backdoor.\n\n${content}`;
+                    outputDiv.innerText += `\nAnalyzing ${javaFile}...`;
+                    const response = await puter.ai.chat(prompt, { model: 'x-ai/grok-4', stream: true });
+                    let fullResponse = '';
+                    for await (const part of response) {
+                        if (part?.text) {
+                            fullResponse += part.text;
+                            outputDiv.innerText += part.text;
+                        }
+                    }
+                    if (fullResponse.trim() === 'Yes') {
+                        hasBackdoor = true;
+                        outputDiv.innerText += `\nPotential backdoor found in ${javaFile}`;
+                    } else {
+                        outputDiv.innerText += `\nNo backdoor in ${javaFile}`;
+                    }
+                } catch (e) {
+                    outputDiv.innerText += `\nError analyzing ${javaFile}: ${e.message}`;
+                }
+            }
+            return hasBackdoor;
+        }
+
+        async function sendResultsToServer(pluginName, hasBackdoor, outputDiv) {
+            await fetch('http://localhost:8080/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pluginName, hasBackdoor })
+            });
+            outputDiv.innerText += `\nAnalysis complete for ${pluginName}. Results logged on server.`;
+        }
+
+        async function processJar() {
+            const fileInput = document.getElementById("jarFileInput");
+            const outputDiv = document.getElementById("output");
+            const analyzeButton = document.getElementById("analyzeButton");
+            analyzeButton.disabled = true;
+            outputDiv.innerText = "Processing...";
+
+            if (!fileInput.files.length) {
+                outputDiv.innerText = "Please select a JAR file.";
+                analyzeButton.disabled = false;
+                return;
+            }
+
+            const file = fileInput.files[0];
+            try {
+                outputDiv.innerText = `Uploading ${file.name} to Puter.js...`;
+                const filePath = await uploadJarFile(file, outputDiv);
+                outputDiv.innerText += `\nDecompiling ${file.name}...`;
+                const { javaFiles, pluginName } = await decompileJar(filePath, outputDiv);
+                outputDiv.innerText += `\nAnalyzing with Grok...`;
+                const hasBackdoor = await analyzeWithGrok(javaFiles, outputDiv);
+                await sendResultsToServer(pluginName, hasBackdoor, outputDiv);
+            } catch (e) {
+                outputDiv.innerText += `\nError: ${e.message}`;
+            }
+            analyzeButton.disabled = false;
+        }
+    </script>
+</body>
+</html>
