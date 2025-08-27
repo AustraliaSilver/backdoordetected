@@ -1,217 +1,394 @@
 package backdoor.detect.backdoordetected;
 
-import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
-import org.bukkit.event.Listener;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.inventory.InventoryClickEvent;
+import backdoor.detect.backdoordetected.BddCommandExecutor;
+import backdoor.detect.backdoordetected.PluginWorker;
 
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.text.SimpleDateFormat;
-import java.util.*;
-
-import org.benf.cfr.reader.api.CfrDriver;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.java.JavaPlugin;
 
 public class Backdoordetected extends JavaPlugin implements Listener {
-
-    private String apiKey;
     private File logFile;
+    private String apiKey1;
+    private String apiKey2;
+    private String model1;
+    private String model2;
+    private boolean enableGemini2;
+    private final AtomicInteger activeScannerThreads = new AtomicInteger(0);
+    private final Map<UUID, Integer> historyPageMap = new HashMap<UUID, Integer>();
+    private final Map<UUID, Integer> pluginSelectPageMap = new HashMap<UUID, Integer>();
 
-    @Override
     public void onEnable() {
-        saveDefaultConfig();
-        FileConfiguration config = getConfig();
-        apiKey = config.getString("gemini_api_key");
-
-        logFile = new File(getDataFolder(), "scan-log.txt");
-        getCommand("bdd").setExecutor(new BackdoorCommand());
-        getServer().getPluginManager().registerEvents(this, this);
-        getLogger().info("BackdoorDetector Plugin Enabled");
+        this.saveDefaultConfig();
+        FileConfiguration config = this.getConfig();
+        this.apiKey1 = config.getString("gemini_api_key", "");
+        this.model1 = config.getString("gemini_model", "gemini-1.5-flash");
+        this.enableGemini2 = config.getBoolean("enable_gemini_2", false);
+        this.apiKey2 = config.getString("gemini_api_key_2", "");
+        this.model2 = config.getString("gemini_model_2", "gemini-1.5-flash");
+        if (this.apiKey1 == null || this.apiKey1.isEmpty()) {
+            this.getLogger().severe("API key 1 is missing! Please check your config.yml.");
+            this.getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+        if (this.enableGemini2 && (this.apiKey2 == null || this.apiKey2.isEmpty())) {
+            this.getLogger().warning("Gemini 2 is enabled but key is missing => disabling Gemini 2.");
+            this.enableGemini2 = false;
+        }
+        this.logFile = new File(this.getDataFolder(), "scan-log.txt");
+        Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this);
+        BddCommandExecutor executor = new BddCommandExecutor(this);
+        this.getCommand("bdd").setExecutor(executor);
+        this.getCommand("bddtrack").setExecutor(executor);
+        this.getCommand("bddscan").setExecutor(executor);
+        this.getLogger().info("BackdoorDetector is enabled!");
     }
 
-    @Override
     public void onDisable() {
-        getLogger().info("BackdoorDetector Plugin Disabled");
+        this.getLogger().info("BackdoorDetector is disabled.");
     }
 
-    public class BackdoorCommand implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage("Only players can open the GUI.");
-                return true;
-            }
+    public Inventory createDetectorGui() {
+        Inventory gui = Bukkit.createInventory(null, (int)27, (String)"Backdoor Detector");
+        gui.setItem(11, this.createItem(Material.COMMAND_BLOCK, "\u00a7a\u00a7lStart Full Scan", "\u00a77Click to start scanning all plugins", "\u00a77on your server for backdoors."));
+        gui.setItem(13, this.createItem(Material.DIAMOND_PICKAXE, "\u00a7b\u00a7lSelect Plugin to Scan", "\u00a77Click to select a specific plugin", "\u00a77and scan only that plugin."));
+        gui.setItem(15, this.createItem(Material.BOOK, "\u00a7e\u00a7nView Scan History", "\u00a77Review previous plugin scan reports.", "\u00a77Entries are sorted from newest to oldest."));
+        ItemStack fillerItem = this.createItem(Material.BLACK_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        for (int i = 0; i < gui.getSize(); ++i) {
+            if (gui.getItem(i) != null) continue;
+            gui.setItem(i, fillerItem);
+        }
+        return gui;
+    }
 
-            if (args.length == 0) {
-                openGui(player);
-                return true;
-            }
-
-            if (args[0].equalsIgnoreCase("track")) {
-                sender.sendMessage("\u23F3 Checking plugins...");
-
-                File pluginDir = new File(getDataFolder().getParent());
-                File[] pluginFiles = pluginDir.listFiles((dir, name) -> name.endsWith(".jar"));
-                if (pluginFiles == null || pluginFiles.length == 0) {
-                    sender.sendMessage("\u274C No plugins found to check.");
-                    return true;
+    public Inventory createHistoryGui(int page) {
+        List<String> entries = this.readLogEntries();
+        int perPage = 35;
+        int maxPage = (int)Math.ceil((double)entries.size() / (double)perPage);
+        page = Math.max(1, Math.min(page, maxPage));
+        Inventory gui = Bukkit.createInventory(null, (int)54, (String)("\u00a7bScan History - Page " + page));
+        int start = (page - 1) * perPage;
+        int end = Math.min(start + perPage, entries.size());
+        for (int i = start; i < end; ++i) {
+            String[] lines;
+            int relativeIndex = i - start;
+            int row = relativeIndex / 7;
+            int col = relativeIndex % 7;
+            int slot = row * 9 + col;
+            if (slot >= gui.getSize()) continue;
+            String logEntry = entries.get(i);
+            String pluginName = "Unknown";
+            String scanTime = "Unknown";
+            String result = "Unknown";
+            for (String line : lines = logEntry.split("\n")) {
+                if (line.startsWith("----- Plugin: ")) {
+                    pluginName = line.replace("----- Plugin: ", "").replace("-----", "").trim();
+                    continue;
                 }
-
-                new BukkitRunnable() {
-                    int index = 0;
-
-                    @Override
-                    public void run() {
-                        int count = 0;
-                        while (index < pluginFiles.length && count < 4) {
-                            File pluginFile = pluginFiles[index++];
-                            if (pluginFile.getName().equalsIgnoreCase("backdoordetected.jar")) continue;
-
-                            scanSinglePlugin(pluginFile, sender);
-                            count++;
-                        }
-
-                        if (index >= pluginFiles.length) {
-                            cancel();
-                            sender.sendMessage("\u2705 All plugins checked.");
-                        }
-                    }
-                }.runTaskTimerAsynchronously(Backdoordetected.this, 0L, 100L);
-
-                return true;
+                if (line.startsWith("Time: ")) {
+                    scanTime = line.replace("Time: ", "").trim();
+                    continue;
+                }
+                if (!line.startsWith("Result: ")) continue;
+                result = line.replace("Result: ", "").trim();
             }
-            return false;
+            String displayName = "\u00a7f" + pluginName;
+            ArrayList<String> itemLore = new ArrayList<String>();
+            itemLore.add("\u00a77Scan Date: \u00a7f" + scanTime);
+            String resultColor = "\u00a77";
+            if (result.equalsIgnoreCase("YES")) {
+                resultColor = "\u00a7c";
+            } else if (result.equalsIgnoreCase("NO")) {
+                resultColor = "\u00a7a";
+            } else if (result.contains("ERROR")) {
+                resultColor = "\u00a7e";
+            } else if (result.contains("UNKNOWN")) {
+                resultColor = "\u00a76";
+            }
+            itemLore.add("\u00a77Result: " + resultColor + result);
+            gui.setItem(slot, this.createItem(Material.PAPER, displayName, itemLore.toArray(new String[0])));
         }
+        gui.setItem(47, this.createItem(Material.ARROW, "\u00a7aPrevious Page", "\u00a77Click to view older reports."));
+        gui.setItem(49, this.createItem(Material.BARRIER, "\u00a7cBack", "\u00a77Click to return to the main menu."));
+        gui.setItem(51, this.createItem(Material.ARROW, "\u00a7aNext Page", "\u00a77Click to view newer reports."));
+        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        for (int i = 0; i < gui.getSize(); ++i) {
+            if (gui.getItem(i) != null) continue;
+            gui.setItem(i, fillerItem);
+        }
+        return gui;
+    }
 
-        private void openGui(Player player) {
-            Inventory gui = Bukkit.createInventory(null, 9, "Backdoor Detector");
-            gui.setItem(4, Bukkit.getItemFactory().createItemStack("COMMAND_BLOCK"));
-            player.openInventory(gui);
+    public Inventory createPluginSelectionGui(int page) {
+        File[] files;
+        ArrayList<File> pluginFiles = new ArrayList<File>();
+        File pluginsDir = this.getDataFolder().getParentFile();
+        if (pluginsDir != null && (files = pluginsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".jar"))) != null) {
+            for (File file : files) {
+                if (file.getName().equalsIgnoreCase(this.getName() + ".jar")) continue;
+                pluginFiles.add(file);
+            }
         }
+        pluginFiles.sort(Comparator.comparing(File::getName));
+        int perPage = 35;
+        int maxPage = Math.max(1, (int)Math.ceil((double)pluginFiles.size() / (double)perPage));
+        page = Math.max(1, Math.min(page, maxPage));
+        Inventory gui = Bukkit.createInventory(null, (int)54, (String)("\u00a79Select Plugin - Page " + page));
+        int start = (page - 1) * perPage;
+        int end = Math.min(start + perPage, pluginFiles.size());
+        List<String> allLogEntries = this.readLogEntries();
+        for (int i = start; i < end; ++i) {
+            int relativeIndex = i - start;
+            int row = relativeIndex / 7;
+            int col = relativeIndex % 7;
+            int slot = row * 9 + col;
+            File file = (File)pluginFiles.get(i);
+            String pluginName = file.getName();
+            String latestScanResult = "\u00a77Never scanned";
+            String latestScanTime = "";
+            for (String logEntry : allLogEntries) {
+                String[] lines;
+                String entryPluginName = "N/A";
+                String entryScanTime = "N/A";
+                String entryResult = "N/A";
+                for (String line : lines = logEntry.split("\n")) {
+                    if (line.startsWith("----- Plugin: ")) {
+                        entryPluginName = line.replace("----- Plugin: ", "").replace("-----", "").trim();
+                        continue;
+                    }
+                    if (line.startsWith("Time: ")) {
+                        entryScanTime = line.replace("Time: ", "").trim();
+                        continue;
+                    }
+                    if (!line.startsWith("Result: ")) continue;
+                    entryResult = line.replace("Result: ", "").trim();
+                }
+                if (!entryPluginName.equals(pluginName)) continue;
+                latestScanTime = entryScanTime;
+                String resultColor = "\u00a77";
+                if (entryResult.equalsIgnoreCase("YES")) {
+                    resultColor = "\u00a7c";
+                } else if (entryResult.equalsIgnoreCase("NO")) {
+                    resultColor = "\u00a7a";
+                } else if (entryResult.contains("ERROR")) {
+                    resultColor = "\u00a7e";
+                } else if (entryResult.contains("UNKNOWN")) {
+                    resultColor = "\u00a76";
+                }
+                latestScanResult = resultColor + entryResult;
+                break;
+            }
+            ArrayList<String> lore = new ArrayList<String>();
+            lore.add("\u00a77Path: \u00a7fplugins/" + pluginName);
+            if (!latestScanTime.isEmpty()) {
+                lore.add("\u00a77Last Scanned: \u00a7f" + latestScanTime);
+                lore.add("\u00a77Last Result: " + latestScanResult);
+            } else {
+                lore.add(latestScanResult);
+            }
+            lore.add("\u00a77Click to scan this plugin.");
+            gui.setItem(slot, this.createItem(Material.LIME_STAINED_GLASS_PANE, "\u00a7e" + pluginName, lore.toArray(new String[0])));
+        }
+        gui.setItem(47, this.createItem(Material.ARROW, "\u00a7aPrevious Page", "\u00a77Click to view previous plugins."));
+        gui.setItem(49, this.createItem(Material.BARRIER, "\u00a7cBack", "\u00a77Click to return to the main menu."));
+        gui.setItem(51, this.createItem(Material.ARROW, "\u00a7aNext Page", "\u00a77Click to view next plugins."));
+        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        for (int i = 0; i < gui.getSize(); ++i) {
+            if (gui.getItem(i) != null) continue;
+            gui.setItem(i, fillerItem);
+        }
+        return gui;
+    }
+
+    private ItemStack createItem(Material mat, String name, String ... lore) {
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(name);
+            if (lore.length > 0) {
+                meta.setLore(Arrays.asList(lore));
+            }
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 
     @EventHandler
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (event.getView().getTitle().equals("Backdoor Detector")) {
-            event.setCancelled(true);
-            Player player = (Player) event.getWhoClicked();
-            player.performCommand("bdd track");
-            player.closeInventory();
+    public void onInventoryClick(InventoryClickEvent e) {
+        Player p = (Player)e.getWhoClicked();
+        String title = e.getView().getTitle();
+        ItemStack item = e.getCurrentItem();
+        e.setCancelled(true);
+        if (item == null || !item.hasItemMeta()) {
+            return;
         }
-    }
-
-    private void scanSinglePlugin(File pluginFile, CommandSender sender) {
-        try {
-            Path tempDir = Files.createTempDirectory("decompiled_plugin_" + pluginFile.getName());
-            List<String> javaFiles = decompilePlugin(pluginFile, tempDir);
-            String prompt = buildInputs(javaFiles);
-            JSONObject response = sendToGemini(prompt);
-
-            String result = response != null ? response.optString("text", "Unknown") : "Unknown";
-
-            String log = "----------------------------" + pluginFile.getName() + "------------------------------\n" +
-                    "- Scan Date: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n" +
-                    "- Plugin Version: Unknown\n" +
-                    "- Contains Backdoor: " + result + "\n" +
-                    "-----------------------------------------------------------------------------\n";
-
-            appendToLog(log);
-            sender.sendMessage("\uD83D\uDD22 Checked: " + pluginFile.getName() + " => " + result);
-
-        } catch (Exception e) {
-            getLogger().severe("Error processing plugin " + pluginFile.getName() + ": " + e.getMessage());
-        }
-    }
-
-    private List<String> decompilePlugin(File pluginFile, Path tempDir) throws Exception {
-        List<String> javaFiles = new ArrayList<>();
-        Map<String, String> options = new HashMap<>();
-        options.put("outputdir", tempDir.toString());
-
-        CfrDriver driver = new CfrDriver.Builder()
-                .withOptions(options)
-                .build();
-
-        driver.analyse(Collections.singletonList(pluginFile.getAbsolutePath()));
-
-        Files.walk(tempDir).filter(path -> path.toString().endsWith(".java"))
-                .forEach(path -> javaFiles.add(path.toString()));
-
-        return javaFiles;
-    }
-
-    private String buildInputs(List<String> javaFiles) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        for (String file : javaFiles) {
-            sb.append(Files.readString(Path.of(file))).append("\n\n");
-            if (sb.length() > 3500) break;
-        }
-        return "In these Java files, is there a backdoor? Only answer 'YES' or 'NO'.':\n" + sb.toString();
-    }
-
-    private JSONObject sendToGemini(String prompt) {
-        try {
-            URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey);
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
-            con.setRequestMethod("POST");
-            con.setDoOutput(true);
-            con.setRequestProperty("Content-Type", "application/json");
-
-            JSONObject requestBody = new JSONObject();
-            JSONArray contents = new JSONArray();
-            JSONObject contentObj = new JSONObject();
-            contentObj.put("parts", new JSONArray().put(new JSONObject().put("text", prompt)));
-            contents.put(contentObj);
-            requestBody.put("contents", contents);
-
-            try (OutputStream os = con.getOutputStream()) {
-                byte[] input = requestBody.toString().getBytes(StandardCharsets.UTF_8);
-                os.write(input, 0, input.length);
+        String display = item.getItemMeta().getDisplayName();
+        if (title.equals("Backdoor Detector")) {
+            if (item.getType() == Material.COMMAND_BLOCK) {
+                p.closeInventory();
+                p.performCommand("bddtrack");
+            } else if (item.getType() == Material.BOOK) {
+                this.historyPageMap.put(p.getUniqueId(), 1);
+                p.openInventory(this.createHistoryGui(1));
+            } else if (item.getType() == Material.DIAMOND_PICKAXE) {
+                this.pluginSelectPageMap.put(p.getUniqueId(), 1);
+                p.openInventory(this.createPluginSelectionGui(1));
             }
-
-            int code = con.getResponseCode();
-            if (code == 200) {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8))) {
-                    StringBuilder response = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        response.append(line.trim());
-                    }
-                    JSONObject responseJson = new JSONObject(response.toString());
-                    JSONArray candidates = responseJson.optJSONArray("candidates");
-                    if (candidates != null && candidates.length() > 0) {
-                        return candidates.getJSONObject(0).optJSONObject("content").optJSONArray("parts").getJSONObject(0);
-                    }
-                }
+        } else if (title.startsWith("\u00a7bScan History")) {
+            int page = this.historyPageMap.getOrDefault(p.getUniqueId(), 1);
+            if (display.contains("Previous Page")) {
+                this.historyPageMap.put(p.getUniqueId(), --page);
+                p.openInventory(this.createHistoryGui(page));
+            } else if (display.contains("Next Page")) {
+                this.historyPageMap.put(p.getUniqueId(), ++page);
+                p.openInventory(this.createHistoryGui(page));
+            } else if (display.contains("Back")) {
+                p.openInventory(this.createDetectorGui());
+            }
+        } else if (title.startsWith("\u00a79Select Plugin")) {
+            int currentPage = this.pluginSelectPageMap.getOrDefault(p.getUniqueId(), 1);
+            if (display.contains("Previous Page")) {
+                this.pluginSelectPageMap.put(p.getUniqueId(), --currentPage);
+                p.openInventory(this.createPluginSelectionGui(currentPage));
+            } else if (display.contains("Next Page")) {
+                this.pluginSelectPageMap.put(p.getUniqueId(), ++currentPage);
+                p.openInventory(this.createPluginSelectionGui(currentPage));
+            } else if (display.contains("Back")) {
+                p.openInventory(this.createDetectorGui());
             } else {
-                getLogger().warning("Gemini API returned error code: " + code);
+                String pluginName = item.getItemMeta().getDisplayName().replace("\u00a7e", "").trim();
+                p.closeInventory();
+                p.performCommand("bddscan " + pluginName);
             }
-        } catch (Exception e) {
-            getLogger().severe("Failed to call Gemini API: " + e.getMessage());
         }
-        return null;
     }
 
-    private void appendToLog(String text) {
+    public void appendToLog(String text) {
         try {
-            Files.createDirectories(logFile.getParentFile().toPath());
-            Files.write(logFile.toPath(), text.getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            if (!this.logFile.exists()) {
+                this.logFile.createNewFile();
+            }
+            Files.write(this.logFile.toPath(), text.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
-            getLogger().warning("Failed to write log to file: " + e.getMessage());
+            this.getLogger().warning("Could not write log: " + e.getMessage());
         }
+    }
+
+    public boolean isPreviouslyScanned(File file) {
+        if (!this.logFile.exists()) {
+            return false;
+        }
+        String hash = this.getSHA256(file);
+        try {
+            List<String> lines = Files.readAllLines(this.logFile.toPath(), StandardCharsets.UTF_8);
+            return lines.stream().anyMatch(l -> l.contains(hash));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    public String getSHA256(File file) {
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buf = new byte[8192];
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            int n;
+            while ((n = fis.read(buf)) > 0) {
+                digest.update(buf, 0, n);
+            }
+            byte[] hash = digest.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            this.getLogger().warning("Error calculating SHA-256: " + e.getMessage());
+            return "";
+        }
+    }
+
+    public void startParallelScanners(BlockingQueue<PluginWorker.PrioritizedFile> pluginQueue, CommandSender sender, Runnable onComplete) {
+        File[] pluginFiles;
+        File pluginsDir;
+        if (pluginQueue.isEmpty() && (pluginsDir = this.getDataFolder().getParentFile()) != null && (pluginFiles = pluginsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".jar"))) != null) {
+            for (File file : pluginFiles) {
+                if (file.getName().equalsIgnoreCase(this.getName() + ".jar")) continue;
+                pluginQueue.offer(new PluginWorker.PrioritizedFile(file, 0));
+            }
+        }
+        this.activeScannerThreads.incrementAndGet();
+        new Thread(new PluginWorker(pluginQueue, this.apiKey1, this.model1, this, sender, "Gemini_1")).start();
+        if (this.enableGemini2) {
+            this.activeScannerThreads.incrementAndGet();
+            new Thread(new PluginWorker(pluginQueue, this.apiKey2, this.model2, this, sender, "Gemini_2")).start();
+        }
+        new Thread(() -> {
+            while (this.activeScannerThreads.get() > 0 || !pluginQueue.isEmpty()) {
+                try {
+                    Thread.sleep(1000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            Bukkit.getScheduler().runTask((Plugin)this, onComplete);
+        }).start();
+    }
+
+    public List<String> readLogEntries() {
+        ArrayList<String> entries = new ArrayList<String>();
+        if (!this.logFile.exists()) {
+            return entries;
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader((InputStream)new FileInputStream(this.logFile), StandardCharsets.UTF_8))) {
+            String line;
+            StringBuilder entry = new StringBuilder();
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("----- Plugin: ") && entry.length() > 0) {
+                    entries.add(entry.toString().trim());
+                    entry.setLength(0);
+                }
+                entry.append(line).append("\n");
+            }
+            if (entry.length() > 0) {
+                entries.add(entry.toString().trim());
+            }
+        } catch (IOException e) {
+            this.getLogger().warning("Could not read scan-log.txt: " + e.getMessage());
+        }
+        Collections.reverse(entries);
+        return entries;
     }
 }

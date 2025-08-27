@@ -1,1 +1,15 @@
-gemini_api_key: "your_gemini_api_key_here"
+gemini_api_key: "YOUR_GEMINI_API_KEY_1_HERE"
+gemini_model: gemini-2.5-flash
+
+enable_gemini_2: true
+
+gemini_api_key_2: "YOUR_GEMINI_API_KEY_2_HERE"
+gemini_model_2: gemini-2.5-flash
+
+#Get API key here: https://aistudio.google.com/
+
+# Choose from the following models:
+# 1. gemini-2.5-flash: default, suitable for normal needs, with free api, max 250 ask per days (or 500 if you use gemini_2).
+# 2. gemini-2.5-pro: more accurate, but slower, with free api, max 100 ask per days (or 200 if you use gemini_2).
+# 3. gemini-2.5-flash-lite-preview-06-17: faster but less accurate, not recommended unless server has many plugins, with free api, max 1000 ask per days (or 2000 if you use gemini_2).
+# For more information, visit https://ai.google.dev/gemini-api/docs/rate-limits.

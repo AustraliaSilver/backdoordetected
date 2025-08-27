@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/backdoordetected.iml" filepath="$PROJECT_DIR$/backdoordetected.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/backdoordetected.iml" filepath="$PROJECT_DIR$/.idea/backdoordetected.iml" />
     </modules>
   </component>
 </project>
