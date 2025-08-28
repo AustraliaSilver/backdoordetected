@@ -28,10 +28,8 @@ public class CodeAnalyzer {
                 String fileContent = Files.readString(filePath);
                 List<String> reasons = new ArrayList<>();
 
-                // Run all individual file checks
                 runAllChecks(reasons, fileContent, filePath);
 
-                // Collect data for multi-file checks
                 if (fileContent.contains("implements Listener")) listenerClasses.add(filePath);
                 if (fileContent.contains("extends JavaPlugin")) mainClasses.add(filePath);
 
@@ -44,7 +42,7 @@ public class CodeAnalyzer {
             }
         }
 
-        // Run multi-file checks
+
         if (listenerClasses.size() > 1) {
             for (Path listenerPath : listenerClasses) {
                 suspiciousFiles.computeIfAbsent(listenerPath, k -> new ArrayList<>()).add("MODERATE: Multiple listener classes found, possible injected listener.");
@@ -72,59 +70,48 @@ public class CodeAnalyzer {
         if (checkClassFileNameMismatch(content, filePath)) reasons.add("LOW: Class name may not match its file name, possible obfuscation.");
     }
 
-    // Based on RuntimeExec
     private boolean checkRuntimeExec(String content) {
         return content.contains("Runtime.getRuntime().exec");
     }
 
-    // Based on BukkitConsoleCommands
     private boolean checkBukkitConsoleCommands(String content) {
         return content.contains("dispatchCommand") && (content.contains("getConsoleSender") || content.contains("ConsoleCommandSender"));
     }
 
-    // Based on RuntimeLoad
     private boolean checkRuntimeLoad(String content) {
         return content.contains("Runtime.getRuntime().load") || content.contains("System.load");
     }
 
-    // Based on ClassLoaderUsed
     private boolean checkClassLoaderUsage(String content) {
         return content.contains("ClassLoader") || content.contains("URLClassLoader");
     }
 
-    // Based on BytecodeManipulationLibraries
     private boolean checkBytecodeLibraries(String content) {
         return content.contains("import org.objectweb.asm") || content.contains("import javassist") || content.contains("import net.bytebuddy");
     }
 
-    // Based on BukkitLoadPlugin
     private boolean checkPluginLoad(String content) {
         return content.contains(".getPluginManager().loadPlugin");
     }
 
-    // Based on BukkitSetOp
     private boolean checkSetOp(String content) {
         return content.contains(".setOp(true)");
     }
 
-    // Based on BukkitPermissionAttachments
     private boolean checkPermissionAttachment(String content) {
         return content.contains("PermissionAttachment");
     }
 
-    // Based on ReflectionMethodCall
     private boolean checkReflection(String content) {
         return content.contains("java.lang.reflect.Method") && content.contains(".invoke");
     }
 
-    // Based on ClassFileNameEquality
     private boolean checkClassFileNameMismatch(String content, Path filePath) {
         String fileName = filePath.getFileName().toString().replace(".java", "");
         Pattern classPattern = Pattern.compile("public\\s+(?:final\\s+|abstract\\s+)?class\\s+([\\w$]+)");
         Matcher matcher = classPattern.matcher(content);
         if (matcher.find()) {
             String className = matcher.group(1);
-            // Only check top-level classes, not inner classes
             if (!className.contains("$")) {
                 return !className.equals(fileName);
             }

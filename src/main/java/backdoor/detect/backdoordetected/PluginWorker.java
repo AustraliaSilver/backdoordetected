@@ -78,7 +78,6 @@ public class PluginWorker implements Runnable {
         String pluginName = pluginFile.getName();
         Path tempDir = null;
         try {
-            // STAGE 1: Decompile
             runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §f[1/3] Decompiling: §e" + pluginName));
             String safePluginName = pluginName.replace(".jar", "").replaceAll("[^a-zA-Z0-9_-]", "_");
             tempDir = tempBaseDir.resolve(safePluginName + "_" + System.nanoTime());
@@ -91,7 +90,6 @@ public class PluginWorker implements Runnable {
                 return;
             }
 
-            // STAGE 2: Internal Analysis
             runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §f[2/3] Performing internal code analysis..."));
             Map<Path, List<String>> analysisResults = codeAnalyzer.analyze(allJavaFiles);
             Map<Path, List<String>> criticalFindings = analysisResults.entrySet().stream()
@@ -109,7 +107,6 @@ public class PluginWorker implements Runnable {
                 return;
             }
 
-            // STAGE 3: Process in batches and get final verdict
             String finalVerdict = processBatchesInChunks(criticalFindings, pluginName);
             writeLog(pluginName, currentDepth, "Gemini Verdict: " + finalVerdict);
             final String messageColor = finalVerdict.contains("YES") ? "§c" : "§a";
@@ -145,7 +142,6 @@ public class PluginWorker implements Runnable {
             final int currentBatchNum = batchNum++;
             final int totalBatches = batches.size();
 
-            // Log the files and reasons for the current batch
             this.pluginInstance.getLogger().info("--> Sending Batch " + currentBatchNum + "/" + totalBatches + " with " + batch.size() + " file(s):");
             for (Map.Entry<Path, List<String>> entry : batch.entrySet()) {
                 this.pluginInstance.getLogger().info("    - File: " + entry.getKey().getFileName());
@@ -169,7 +165,6 @@ public class PluginWorker implements Runnable {
             allResults.add(answer);
             this.pluginInstance.getLogger().info("<-- Batch " + currentBatchNum + " of " + totalBatches + " result: " + answer);
 
-            // If we get a YES, we can stop early.
             if (answer.equals("YES")) {
                 this.pluginInstance.getLogger().info("Immediate 'YES' verdict from batch " + currentBatchNum + ". Halting further analysis.");
                 break;
@@ -177,7 +172,6 @@ public class PluginWorker implements Runnable {
         }
         this.pluginInstance.getLogger().info("----------------------------------------------------");
 
-        // Aggregate results
         if (allResults.stream().anyMatch("YES"::equals)) {
             return "YES";
         } else if (allResults.stream().allMatch("NO"::equals)) {
@@ -221,7 +215,7 @@ public class PluginWorker implements Runnable {
         for (String reason : reasons) {
             size += ("- " + reason + "\n").length();
         }
-        size += Files.size(path); // Add the actual file size
+        size += Files.size(path);
         size += ("\n// --- File: " + path.getFileName() + " ---\n\n").length();
         return size;
     }
@@ -243,7 +237,7 @@ public class PluginWorker implements Runnable {
 
         for (Path path : analysisResults.keySet()) {
             String content = Files.readString(path, StandardCharsets.UTF_8);
-            // This check is now a safeguard, main logic is in createBatches
+
             if (sb.length() + content.length() > MAX_PROMPT_LENGTH) {
                 this.pluginInstance.getLogger().warning("Prompt limit reached while building batch, sending partial code for analysis.");
                 break;
