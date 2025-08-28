@@ -1,26 +1,10 @@
 package backdoor.detect.backdoordetected;
 
-import backdoor.detect.backdoordetected.BddCommandExecutor;
-import backdoor.detect.backdoordetected.PluginWorker;
-
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
+import java.io.*;
 import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,9 +31,10 @@ public class Backdoordetected extends JavaPlugin implements Listener {
     private String model2;
     private boolean enableGemini2;
     private final AtomicInteger activeScannerThreads = new AtomicInteger(0);
-    private final Map<UUID, Integer> historyPageMap = new HashMap<UUID, Integer>();
-    private final Map<UUID, Integer> pluginSelectPageMap = new HashMap<UUID, Integer>();
+    private final Map<UUID, Integer> historyPageMap = new HashMap<>();
+    private final Map<UUID, Integer> pluginSelectPageMap = new HashMap<>();
 
+    @Override
     public void onEnable() {
         this.saveDefaultConfig();
         FileConfiguration config = this.getConfig();
@@ -58,6 +43,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
         this.enableGemini2 = config.getBoolean("enable_gemini_2", false);
         this.apiKey2 = config.getString("gemini_api_key_2", "");
         this.model2 = config.getString("gemini_model_2", "gemini-1.5-flash");
+
         if (this.apiKey1 == null || this.apiKey1.isEmpty()) {
             this.getLogger().severe("API key 1 is missing! Please check your config.yml.");
             this.getServer().getPluginManager().disablePlugin(this);
@@ -67,8 +53,9 @@ public class Backdoordetected extends JavaPlugin implements Listener {
             this.getLogger().warning("Gemini 2 is enabled but key is missing => disabling Gemini 2.");
             this.enableGemini2 = false;
         }
+
         this.logFile = new File(this.getDataFolder(), "scan-log.txt");
-        Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this);
+        Bukkit.getPluginManager().registerEvents(this, this);
         BddCommandExecutor executor = new BddCommandExecutor(this);
         this.getCommand("bdd").setExecutor(executor);
         this.getCommand("bddtrack").setExecutor(executor);
@@ -247,50 +234,53 @@ public class Backdoordetected extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent e) {
-        Player p = (Player)e.getWhoClicked();
         String title = e.getView().getTitle();
-        ItemStack item = e.getCurrentItem();
-        e.setCancelled(true);
-        if (item == null || !item.hasItemMeta()) {
-            return;
-        }
-        String display = item.getItemMeta().getDisplayName();
-        if (title.equals("Backdoor Detector")) {
-            if (item.getType() == Material.COMMAND_BLOCK) {
-                p.closeInventory();
-                p.performCommand("bddtrack");
-            } else if (item.getType() == Material.BOOK) {
-                this.historyPageMap.put(p.getUniqueId(), 1);
-                p.openInventory(this.createHistoryGui(1));
-            } else if (item.getType() == Material.DIAMOND_PICKAXE) {
-                this.pluginSelectPageMap.put(p.getUniqueId(), 1);
-                p.openInventory(this.createPluginSelectionGui(1));
+
+        if (title.equals("Backdoor Detector") || title.startsWith("\u00a7bScan History") || title.startsWith("\u00a79Select Plugin")) {
+            e.setCancelled(true);
+            Player p = (Player)e.getWhoClicked();
+            ItemStack item = e.getCurrentItem();
+            if (item == null || !item.hasItemMeta()) {
+                return;
             }
-        } else if (title.startsWith("\u00a7bScan History")) {
-            int page = this.historyPageMap.getOrDefault(p.getUniqueId(), 1);
-            if (display.contains("Previous Page")) {
-                this.historyPageMap.put(p.getUniqueId(), --page);
-                p.openInventory(this.createHistoryGui(page));
-            } else if (display.contains("Next Page")) {
-                this.historyPageMap.put(p.getUniqueId(), ++page);
-                p.openInventory(this.createHistoryGui(page));
-            } else if (display.contains("Back")) {
-                p.openInventory(this.createDetectorGui());
-            }
-        } else if (title.startsWith("\u00a79Select Plugin")) {
-            int currentPage = this.pluginSelectPageMap.getOrDefault(p.getUniqueId(), 1);
-            if (display.contains("Previous Page")) {
-                this.pluginSelectPageMap.put(p.getUniqueId(), --currentPage);
-                p.openInventory(this.createPluginSelectionGui(currentPage));
-            } else if (display.contains("Next Page")) {
-                this.pluginSelectPageMap.put(p.getUniqueId(), ++currentPage);
-                p.openInventory(this.createPluginSelectionGui(currentPage));
-            } else if (display.contains("Back")) {
-                p.openInventory(this.createDetectorGui());
-            } else {
-                String pluginName = item.getItemMeta().getDisplayName().replace("\u00a7e", "").trim();
-                p.closeInventory();
-                p.performCommand("bddscan " + pluginName);
+            String display = item.getItemMeta().getDisplayName();
+            if (title.equals("Backdoor Detector")) {
+                if (item.getType() == Material.COMMAND_BLOCK) {
+                    p.closeInventory();
+                    p.performCommand("bddtrack");
+                } else if (item.getType() == Material.BOOK) {
+                    this.historyPageMap.put(p.getUniqueId(), 1);
+                    p.openInventory(this.createHistoryGui(1));
+                } else if (item.getType() == Material.DIAMOND_PICKAXE) {
+                    this.pluginSelectPageMap.put(p.getUniqueId(), 1);
+                    p.openInventory(this.createPluginSelectionGui(1));
+                }
+            } else if (title.startsWith("\u00a7bScan History")) {
+                int page = this.historyPageMap.getOrDefault(p.getUniqueId(), 1);
+                if (display.contains("Previous Page")) {
+                    this.historyPageMap.put(p.getUniqueId(), --page);
+                    p.openInventory(this.createHistoryGui(page));
+                } else if (display.contains("Next Page")) {
+                    this.historyPageMap.put(p.getUniqueId(), ++page);
+                    p.openInventory(this.createHistoryGui(page));
+                } else if (display.contains("Back")) {
+                    p.openInventory(this.createDetectorGui());
+                }
+            } else if (title.startsWith("\u00a79Select Plugin")) {
+                int currentPage = this.pluginSelectPageMap.getOrDefault(p.getUniqueId(), 1);
+                if (display.contains("Previous Page")) {
+                    this.pluginSelectPageMap.put(p.getUniqueId(), --currentPage);
+                    p.openInventory(this.createPluginSelectionGui(currentPage));
+                } else if (display.contains("Next Page")) {
+                    this.pluginSelectPageMap.put(p.getUniqueId(), ++currentPage);
+                    p.openInventory(this.createPluginSelectionGui(currentPage));
+                } else if (display.contains("Back")) {
+                    p.openInventory(this.createDetectorGui());
+                } else {
+                    String pluginName = item.getItemMeta().getDisplayName().replace("\u00a7e", "").trim();
+                    p.closeInventory();
+                    p.performCommand("bddscan " + pluginName);
+                }
             }
         }
     }
@@ -300,25 +290,37 @@ public class Backdoordetected extends JavaPlugin implements Listener {
             if (!this.logFile.exists()) {
                 this.logFile.createNewFile();
             }
-            Files.write(this.logFile.toPath(), text.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.write(this.logFile.toPath(), (text + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
         } catch (IOException e) {
             this.getLogger().warning("Could not write log: " + e.getMessage());
         }
     }
 
-    public boolean isPreviouslyScanned(File file) {
+    public List<String> readLogEntries() {
+        ArrayList<String> entries = new ArrayList<String>();
         if (!this.logFile.exists()) {
-            return false;
+            return entries;
         }
-        String hash = this.getSHA256(file);
-        try {
-            List<String> lines = Files.readAllLines(this.logFile.toPath(), StandardCharsets.UTF_8);
-            return lines.stream().anyMatch(l -> l.contains(hash));
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(this.logFile), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            StringBuilder entry = new StringBuilder();
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("----- Plugin: ") && entry.length() > 0) {
+                    entries.add(entry.toString().trim());
+                    entry.setLength(0);
+                }
+                entry.append(line).append("\n");
+            }
+            if (entry.length() > 0) {
+                entries.add(entry.toString().trim());
+            }
         } catch (IOException e) {
-            return false;
+            this.getLogger().warning("Could not read scan-log.txt: " + e.getMessage());
         }
+        Collections.reverse(entries);
+        return entries;
     }
-
+    
     public String getSHA256(File file) {
         try (FileInputStream fis = new FileInputStream(file)) {
             byte[] buf = new byte[8192];
@@ -340,14 +342,6 @@ public class Backdoordetected extends JavaPlugin implements Listener {
     }
 
     public void startParallelScanners(BlockingQueue<PluginWorker.PrioritizedFile> pluginQueue, CommandSender sender, Runnable onComplete) {
-        File[] pluginFiles;
-        File pluginsDir;
-        if (pluginQueue.isEmpty() && (pluginsDir = this.getDataFolder().getParentFile()) != null && (pluginFiles = pluginsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".jar"))) != null) {
-            for (File file : pluginFiles) {
-                if (file.getName().equalsIgnoreCase(this.getName() + ".jar")) continue;
-                pluginQueue.offer(new PluginWorker.PrioritizedFile(file, 0));
-            }
-        }
         this.activeScannerThreads.incrementAndGet();
         new Thread(new PluginWorker(pluginQueue, this.apiKey1, this.model1, this, sender, "Gemini_1")).start();
         if (this.enableGemini2) {
@@ -363,32 +357,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                     break;
                 }
             }
-            Bukkit.getScheduler().runTask((Plugin)this, onComplete);
+            Bukkit.getScheduler().runTask(this, onComplete);
         }).start();
-    }
-
-    public List<String> readLogEntries() {
-        ArrayList<String> entries = new ArrayList<String>();
-        if (!this.logFile.exists()) {
-            return entries;
-        }
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader((InputStream)new FileInputStream(this.logFile), StandardCharsets.UTF_8))) {
-            String line;
-            StringBuilder entry = new StringBuilder();
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("----- Plugin: ") && entry.length() > 0) {
-                    entries.add(entry.toString().trim());
-                    entry.setLength(0);
-                }
-                entry.append(line).append("\n");
-            }
-            if (entry.length() > 0) {
-                entries.add(entry.toString().trim());
-            }
-        } catch (IOException e) {
-            this.getLogger().warning("Could not read scan-log.txt: " + e.getMessage());
-        }
-        Collections.reverse(entries);
-        return entries;
     }
 }
