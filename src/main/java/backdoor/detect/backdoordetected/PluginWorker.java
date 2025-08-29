@@ -27,8 +27,19 @@ public class PluginWorker implements Runnable {
     private final Backdoordetected pluginInstance;
     private final CommandSender sender;
     private final String apiInstanceName;
-    private static final int MAX_PROMPT_LENGTH = 1048576;
+    private static final int MAX_PROMPT_LENGTH = 262144;
     private final CodeAnalyzer codeAnalyzer;
+
+    // Wrapper class for Gemini API response
+    private static class GeminiResponse {
+        final JSONObject json;
+        final int statusCode;
+
+        GeminiResponse(JSONObject json, int statusCode) {
+            this.json = json;
+            this.statusCode = statusCode;
+        }
+    }
 
     public PluginWorker(BlockingQueue<PrioritizedFile> queue, String apiKey, String modelName, Backdoordetected pluginInstance, CommandSender sender, String apiInstanceName) {
         this.queue = queue;
@@ -56,6 +67,9 @@ public class PluginWorker implements Runnable {
 
             try {
                 processFile(pFile.file, pFile.depth, tempBaseDir);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                this.pluginInstance.getLogger().warning("[" + this.apiInstanceName + "] Processing of " + pFile.file.getName() + " was interrupted.");
             } catch (Exception e) {
                 this.pluginInstance.getLogger().severe("[" + this.apiInstanceName + "] Unhandled exception while processing " + pFile.file.getName() + ": " + e.getMessage());
                 e.printStackTrace();
@@ -74,7 +88,7 @@ public class PluginWorker implements Runnable {
         });
     }
 
-    private void processFile(File pluginFile, int currentDepth, Path tempBaseDir) {
+    private void processFile(File pluginFile, int currentDepth, Path tempBaseDir) throws InterruptedException {
         String pluginName = pluginFile.getName();
         Path tempDir = null;
         try {
@@ -93,7 +107,7 @@ public class PluginWorker implements Runnable {
             runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §f[2/3] Performing internal code analysis..."));
             Map<Path, List<String>> analysisResults = codeAnalyzer.analyze(allJavaFiles);
             Map<Path, List<String>> criticalFindings = analysisResults.entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getKey, entry -> 
+                .collect(Collectors.toMap(Map.Entry::getKey, entry ->
                     entry.getValue().stream()
                          .filter(reason -> reason.startsWith("CRITICAL") || reason.startsWith("HIGH"))
                          .collect(Collectors.toList())))
@@ -130,7 +144,7 @@ public class PluginWorker implements Runnable {
         }
     }
 
-    private String processBatchesInChunks(Map<Path, List<String>> criticalFindings, String pluginName) throws IOException {
+    private String processBatchesInChunks(Map<Path, List<String>> criticalFindings, String pluginName) throws IOException, InterruptedException {
         List<Map<Path, List<String>>> batches = createBatches(criticalFindings);
         List<String> allResults = new ArrayList<>();
         int batchNum = 1;
@@ -142,19 +156,15 @@ public class PluginWorker implements Runnable {
             final int currentBatchNum = batchNum++;
             final int totalBatches = batches.size();
 
-            this.pluginInstance.getLogger().info("--> Sending Batch " + currentBatchNum + "/" + totalBatches + " with " + batch.size() + " file(s):");
-            for (Map.Entry<Path, List<String>> entry : batch.entrySet()) {
-                this.pluginInstance.getLogger().info("    - File: " + entry.getKey().getFileName());
-                for (String reason : entry.getValue()) {
-                    this.pluginInstance.getLogger().info("      - Reason: " + reason);
-                }
+            // Log the files being sent in this batch
+            this.pluginInstance.getLogger().info("--> Preparing Batch " + currentBatchNum + "/" + totalBatches + " for Gemini with " + batch.size() + " file(s):");
+            for (Path filePath : batch.keySet()) {
+                this.pluginInstance.getLogger().info("    - " + filePath.getFileName());
             }
 
-            runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §f[3/3] Sending batch " + currentBatchNum + " of " + totalBatches + " to Gemini..."));
-            
             String prompt = buildGeminiPrompt(batch);
-            JSONObject result = sendToGemini(prompt, currentApiKey, currentModelName);
-            
+            JSONObject result = sendToGeminiWithRetries(prompt, currentApiKey, currentModelName, currentBatchNum, totalBatches);
+
             String answer = "ERROR";
             if (result != null) {
                 answer = result.optString("text", "NO RESPONSE").trim().toUpperCase();
@@ -177,7 +187,8 @@ public class PluginWorker implements Runnable {
         } else if (allResults.stream().allMatch("NO"::equals)) {
             return "NO";
         } else {
-            return "ERROR (Inconclusive results from batches)";
+            long errorCount = allResults.stream().filter(r -> !r.equals("NO") && !r.equals("YES")).count();
+            return "ERROR (" + errorCount + "/" + allResults.size() + " batches failed)";
         }
     }
 
@@ -194,7 +205,7 @@ public class PluginWorker implements Runnable {
                 currentBatch = new HashMap<>();
                 currentSize = getBasePromptSize();
             }
-            
+
             currentBatch.put(entry.getKey(), entry.getValue());
             currentSize += entrySize;
         }
@@ -237,7 +248,6 @@ public class PluginWorker implements Runnable {
 
         for (Path path : analysisResults.keySet()) {
             String content = Files.readString(path, StandardCharsets.UTF_8);
-
             if (sb.length() + content.length() > MAX_PROMPT_LENGTH) {
                 this.pluginInstance.getLogger().warning("Prompt limit reached while building batch, sending partial code for analysis.");
                 break;
@@ -263,10 +273,52 @@ public class PluginWorker implements Runnable {
         }
     }
 
-    private JSONObject sendToGemini(String prompt, String apiKey, String modelName) {
+    private JSONObject sendToGeminiWithRetries(String prompt, String apiKey, String modelName, int currentBatchNum, int totalBatches) throws InterruptedException {
+        final int MAX_ATTEMPTS = 3;
+
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            final int currentAttempt = attempt;
+            runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §f[3/3] Sending batch " + currentBatchNum + " of " + totalBatches + " to Gemini... (Attempt " + currentAttempt + "/" + MAX_ATTEMPTS + ")"));
+
+            GeminiResponse response = sendToGemini(prompt, apiKey, modelName);
+            if (response.json != null) {
+                return response.json; // Success
+            }
+
+            // Failure logic
+            this.pluginInstance.getLogger().warning("<-- Batch " + currentBatchNum + " attempt " + currentAttempt + " failed with status code " + response.statusCode);
+
+            if (attempt < MAX_ATTEMPTS) {
+                long delay;
+                String reason;
+                if (response.statusCode == 429) {
+                    delay = 50000; // 50 seconds for rate limit
+                    reason = "API rate limit hit";
+                } else if (response.statusCode == 503) {
+                    delay = 50000; // 50 seconds for service unavailable
+                    reason = "API service unavailable (503)";
+                } else {
+                    delay = 5000; // 5 seconds for other errors
+                    reason = "API error";
+                }
+                final long finalDelaySec = delay / 1000;
+                final String finalReason = reason;
+                runTaskOnMainThread(() -> sender.sendMessage("§b[" + apiInstanceName + "] §e" + finalReason + ". Waiting " + finalDelaySec + "s before retry..."));
+                Thread.sleep(delay);
+            } else {
+                this.pluginInstance.getLogger().severe("<-- Batch " + currentBatchNum + " failed after " + MAX_ATTEMPTS + " attempts.");
+                runTaskOnMainThread(() -> sender.sendMessage("§c[" + apiInstanceName + "] Failed to analyze batch " + currentBatchNum + ". Please check server logs."));
+            }
+        }
+        return null; // All retries failed
+    }
+
+
+    private GeminiResponse sendToGemini(String prompt, String apiKey, String modelName) {
+        HttpURLConnection con = null;
         try {
             URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey);
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con = (HttpURLConnection) url.openConnection();
             con.setRequestMethod("POST");
             con.setDoOutput(true);
             con.setRequestProperty("Content-Type", "application/json");
@@ -283,23 +335,40 @@ public class PluginWorker implements Runnable {
                 os.write(input, 0, input.length);
             }
 
-            if (con.getResponseCode() != 200) {
-                this.pluginInstance.getLogger().warning("API returned status: " + con.getResponseCode());
-                return null;
+            int statusCode = con.getResponseCode();
+            if (statusCode != 200) {
+                this.pluginInstance.getLogger().warning("API returned status: " + statusCode);
+                try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(con.getErrorStream(), StandardCharsets.UTF_8))) {
+                    String errorResponse = errorReader.lines().collect(Collectors.joining());
+                    this.pluginInstance.getLogger().warning("API Error Response: " + errorResponse);
+                } catch (Exception ex) {
+                    // Ignore if can't read error stream
+                }
+                return new GeminiResponse(null, statusCode);
             }
 
             try (BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8))) {
                 String response = br.lines().collect(Collectors.joining());
                 JSONObject jsonResponse = new JSONObject(response);
                 JSONArray candidates = jsonResponse.optJSONArray("candidates");
-                if (candidates == null || candidates.isEmpty()) return null;
+                if (candidates == null || candidates.isEmpty()) {
+                    this.pluginInstance.getLogger().warning("API response contained no candidates. Full response: " + response);
+                    return new GeminiResponse(null, statusCode);
+                }
                 JSONObject content = candidates.getJSONObject(0).optJSONObject("content");
-                if (content == null) return null;
-                return content.optJSONArray("parts").getJSONObject(0);
+                if (content == null) {
+                    this.pluginInstance.getLogger().warning("API response candidate had no content. Full response: " + response);
+                    return new GeminiResponse(null, statusCode);
+                }
+                return new GeminiResponse(content.optJSONArray("parts").getJSONObject(0), 200);
             }
         } catch (Exception e) {
             this.pluginInstance.getLogger().warning("Error sending to Gemini: " + e.getMessage());
-            return null;
+            return new GeminiResponse(null, -1); // -1 for internal plugin errors
+        } finally {
+            if (con != null) {
+                con.disconnect();
+            }
         }
     }
 

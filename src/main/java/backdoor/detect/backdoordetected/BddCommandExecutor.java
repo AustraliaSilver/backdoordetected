@@ -1,7 +1,5 @@
 package backdoor.detect.backdoordetected;
 
-import backdoor.detect.backdoordetected.Backdoordetected;
-import backdoor.detect.backdoordetected.PluginWorker.PrioritizedFile;
 import java.io.File;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;

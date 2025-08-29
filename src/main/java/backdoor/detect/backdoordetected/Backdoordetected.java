@@ -68,11 +68,11 @@ public class Backdoordetected extends JavaPlugin implements Listener {
     }
 
     public Inventory createDetectorGui() {
-        Inventory gui = Bukkit.createInventory(null, (int)27, (String)"Backdoor Detector");
-        gui.setItem(11, this.createItem(Material.COMMAND_BLOCK, "\u00a7a\u00a7lStart Full Scan", "\u00a77Click to start scanning all plugins", "\u00a77on your server for backdoors."));
-        gui.setItem(13, this.createItem(Material.DIAMOND_PICKAXE, "\u00a7b\u00a7lSelect Plugin to Scan", "\u00a77Click to select a specific plugin", "\u00a77and scan only that plugin."));
-        gui.setItem(15, this.createItem(Material.BOOK, "\u00a7e\u00a7nView Scan History", "\u00a77Review previous plugin scan reports.", "\u00a77Entries are sorted from newest to oldest."));
-        ItemStack fillerItem = this.createItem(Material.BLACK_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        Inventory gui = Bukkit.createInventory(null, 27, "Backdoor Detector");
+        gui.setItem(11, this.createItem(Material.COMMAND_BLOCK, "§a§lStart Full Scan", "§7Click to start scanning all plugins", "§7on your server for backdoors."));
+        gui.setItem(13, this.createItem(Material.DIAMOND_PICKAXE, "§b§lSelect Plugin to Scan", "§7Click to select a specific plugin", "§7and scan only that plugin."));
+        gui.setItem(15, this.createItem(Material.BOOK, "§e§nView Scan History", "§7Review previous plugin scan reports.", "§7Entries are sorted from newest to oldest."));
+        ItemStack fillerItem = this.createItem(Material.BLACK_STAINED_GLASS_PANE, "§r");
         for (int i = 0; i < gui.getSize(); ++i) {
             if (gui.getItem(i) != null) continue;
             gui.setItem(i, fillerItem);
@@ -85,7 +85,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
         int perPage = 35;
         int maxPage = (int)Math.ceil((double)entries.size() / (double)perPage);
         page = Math.max(1, Math.min(page, maxPage));
-        Inventory gui = Bukkit.createInventory(null, (int)54, (String)("\u00a7bScan History - Page " + page));
+        Inventory gui = Bukkit.createInventory(null, 54, "§bScan History - Page " + page);
         int start = (page - 1) * perPage;
         int end = Math.min(start + perPage, entries.size());
         for (int i = start; i < end; ++i) {
@@ -111,26 +111,26 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                 if (!line.startsWith("Result: ")) continue;
                 result = line.replace("Result: ", "").trim();
             }
-            String displayName = "\u00a7f" + pluginName;
+            String displayName = "§f" + pluginName;
             ArrayList<String> itemLore = new ArrayList<String>();
-            itemLore.add("\u00a77Scan Date: \u00a7f" + scanTime);
-            String resultColor = "\u00a77";
+            itemLore.add("§7Scan Date: §f" + scanTime);
+            String resultColor = "§7";
             if (result.equalsIgnoreCase("YES")) {
-                resultColor = "\u00a7c";
+                resultColor = "§c";
             } else if (result.equalsIgnoreCase("NO")) {
-                resultColor = "\u00a7a";
+                resultColor = "§a";
             } else if (result.contains("ERROR")) {
-                resultColor = "\u00a7e";
+                resultColor = "§e";
             } else if (result.contains("UNKNOWN")) {
-                resultColor = "\u00a76";
+                resultColor = "§6";
             }
-            itemLore.add("\u00a77Result: " + resultColor + result);
+            itemLore.add("§7Result: " + resultColor + result);
             gui.setItem(slot, this.createItem(Material.PAPER, displayName, itemLore.toArray(new String[0])));
         }
-        gui.setItem(47, this.createItem(Material.ARROW, "\u00a7aPrevious Page", "\u00a77Click to view older reports."));
-        gui.setItem(49, this.createItem(Material.BARRIER, "\u00a7cBack", "\u00a77Click to return to the main menu."));
-        gui.setItem(51, this.createItem(Material.ARROW, "\u00a7aNext Page", "\u00a77Click to view newer reports."));
-        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        gui.setItem(47, this.createItem(Material.ARROW, "§aPrevious Page", "§7Click to view older reports."));
+        gui.setItem(49, this.createItem(Material.BARRIER, "§cBack", "§7Click to return to the main menu."));
+        gui.setItem(51, this.createItem(Material.ARROW, "§aNext Page", "§7Click to view newer reports."));
+        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "§r");
         for (int i = 0; i < gui.getSize(); ++i) {
             if (gui.getItem(i) != null) continue;
             gui.setItem(i, fillerItem);
@@ -152,7 +152,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
         int perPage = 35;
         int maxPage = Math.max(1, (int)Math.ceil((double)pluginFiles.size() / (double)perPage));
         page = Math.max(1, Math.min(page, maxPage));
-        Inventory gui = Bukkit.createInventory(null, (int)54, (String)("\u00a79Select Plugin - Page " + page));
+        Inventory gui = Bukkit.createInventory(null, 54, "§9Select Plugin - Page " + page);
         int start = (page - 1) * perPage;
         int end = Math.min(start + perPage, pluginFiles.size());
         List<String> allLogEntries = this.readLogEntries();
@@ -163,7 +163,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
             int slot = row * 9 + col;
             File file = (File)pluginFiles.get(i);
             String pluginName = file.getName();
-            String latestScanResult = "\u00a77Never scanned";
+            String latestScanResult = "§7Never scanned";
             String latestScanTime = "";
             for (String logEntry : allLogEntries) {
                 String[] lines;
@@ -184,34 +184,34 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                 }
                 if (!entryPluginName.equals(pluginName)) continue;
                 latestScanTime = entryScanTime;
-                String resultColor = "\u00a77";
+                String resultColor = "§7";
                 if (entryResult.equalsIgnoreCase("YES")) {
-                    resultColor = "\u00a7c";
+                    resultColor = "§c";
                 } else if (entryResult.equalsIgnoreCase("NO")) {
-                    resultColor = "\u00a7a";
+                    resultColor = "§a";
                 } else if (entryResult.contains("ERROR")) {
-                    resultColor = "\u00a7e";
+                    resultColor = "§e";
                 } else if (entryResult.contains("UNKNOWN")) {
-                    resultColor = "\u00a76";
+                    resultColor = "§6";
                 }
                 latestScanResult = resultColor + entryResult;
                 break;
             }
             ArrayList<String> lore = new ArrayList<String>();
-            lore.add("\u00a77Path: \u00a7fplugins/" + pluginName);
+            lore.add("§7Path: §fplugins/" + pluginName);
             if (!latestScanTime.isEmpty()) {
-                lore.add("\u00a77Last Scanned: \u00a7f" + latestScanTime);
-                lore.add("\u00a77Last Result: " + latestScanResult);
+                lore.add("§7Last Scanned: §f" + latestScanTime);
+                lore.add("§7Last Result: " + latestScanResult);
             } else {
                 lore.add(latestScanResult);
             }
-            lore.add("\u00a77Click to scan this plugin.");
-            gui.setItem(slot, this.createItem(Material.LIME_STAINED_GLASS_PANE, "\u00a7e" + pluginName, lore.toArray(new String[0])));
+            lore.add("§7Click to scan this plugin.");
+            gui.setItem(slot, this.createItem(Material.LIME_STAINED_GLASS_PANE, "§e" + pluginName, lore.toArray(new String[0])));
         }
-        gui.setItem(47, this.createItem(Material.ARROW, "\u00a7aPrevious Page", "\u00a77Click to view previous plugins."));
-        gui.setItem(49, this.createItem(Material.BARRIER, "\u00a7cBack", "\u00a77Click to return to the main menu."));
-        gui.setItem(51, this.createItem(Material.ARROW, "\u00a7aNext Page", "\u00a77Click to view next plugins."));
-        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "\u00a7r", new String[0]);
+        gui.setItem(47, this.createItem(Material.ARROW, "§aPrevious Page", "§7Click to view previous plugins."));
+        gui.setItem(49, this.createItem(Material.BARRIER, "§cBack", "§7Click to return to the main menu."));
+        gui.setItem(51, this.createItem(Material.ARROW, "§aNext Page", "§7Click to view next plugins."));
+        ItemStack fillerItem = this.createItem(Material.GRAY_STAINED_GLASS_PANE, "§r");
         for (int i = 0; i < gui.getSize(); ++i) {
             if (gui.getItem(i) != null) continue;
             gui.setItem(i, fillerItem);
@@ -236,7 +236,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
     public void onInventoryClick(InventoryClickEvent e) {
         String title = e.getView().getTitle();
 
-        if (title.equals("Backdoor Detector") || title.startsWith("\u00a7bScan History") || title.startsWith("\u00a79Select Plugin")) {
+        if (title.equals("Backdoor Detector") || title.startsWith("§bScan History") || title.startsWith("§9Select Plugin")) {
             e.setCancelled(true);
             Player p = (Player)e.getWhoClicked();
             ItemStack item = e.getCurrentItem();
@@ -255,7 +255,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                     this.pluginSelectPageMap.put(p.getUniqueId(), 1);
                     p.openInventory(this.createPluginSelectionGui(1));
                 }
-            } else if (title.startsWith("\u00a7bScan History")) {
+            } else if (title.startsWith("§bScan History")) {
                 int page = this.historyPageMap.getOrDefault(p.getUniqueId(), 1);
                 if (display.contains("Previous Page")) {
                     this.historyPageMap.put(p.getUniqueId(), --page);
@@ -266,7 +266,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                 } else if (display.contains("Back")) {
                     p.openInventory(this.createDetectorGui());
                 }
-            } else if (title.startsWith("\u00a79Select Plugin")) {
+            } else if (title.startsWith("§9Select Plugin")) {
                 int currentPage = this.pluginSelectPageMap.getOrDefault(p.getUniqueId(), 1);
                 if (display.contains("Previous Page")) {
                     this.pluginSelectPageMap.put(p.getUniqueId(), --currentPage);
@@ -277,7 +277,7 @@ public class Backdoordetected extends JavaPlugin implements Listener {
                 } else if (display.contains("Back")) {
                     p.openInventory(this.createDetectorGui());
                 } else {
-                    String pluginName = item.getItemMeta().getDisplayName().replace("\u00a7e", "").trim();
+                    String pluginName = item.getItemMeta().getDisplayName().replace("§e", "").trim();
                     p.closeInventory();
                     p.performCommand("bddscan " + pluginName);
                 }
