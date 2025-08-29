@@ -59,7 +59,7 @@ public class CodeAnalyzer {
     }
 
     private void runAllChecks(List<String> reasons, String content, Path filePath) {
-        // Existing and modified checks
+
         if (checkRuntimeExec(content)) reasons.add("CRITICAL: Executes system commands (Runtime.exec/ProcessBuilder).");
         if (checkUnsafeApis(content)) reasons.add("CRITICAL: Uses unsafe APIs like JNDI, RMI, or Unsafe, potential for RCE.");
         if (checkUnsafeClassLoading(content)) reasons.add("CRITICAL: Uses advanced class loading/defining, can bypass security.");
@@ -81,7 +81,7 @@ public class CodeAnalyzer {
         if (checkThreadingAbuse(content)) reasons.add("HIGH: Creates new Threads/Timers, can be used to hide tasks.");
     }
 
-    // --- CRITICAL CHECKS ---
+
     private boolean checkRuntimeExec(String content) {
         return content.contains("Runtime.getRuntime().exec") || content.contains("new ProcessBuilder");
     }
@@ -98,7 +98,6 @@ public class CodeAnalyzer {
         return content.contains(".getCommandMap().register") || content.contains(".dispatchCommand");
     }
 
-    // --- HIGH CHECKS ---
     private boolean checkNetworkUsage(String content) {
         if (content.contains("new URL(") || content.contains(".openConnection()")) {
             Matcher ipMatcher = IP_PATTERN.matcher(content);
@@ -143,7 +142,6 @@ public class CodeAnalyzer {
         return false;
     }
 
-    // --- MODERATE CHECKS ---
     private boolean checkEncryptionApis(String content) {
         return content.contains("javax.crypto.Cipher") || content.contains("SecretKeySpec") || content.contains("MessageDigest") || content.contains("KeyGenerator");
     }
@@ -151,7 +149,6 @@ public class CodeAnalyzer {
         return content.contains("System.getenv") || content.contains("System.getProperty") || content.contains("ManagementFactory");
     }
 
-    // --- LOW CHECKS ---
     private boolean checkFileIO(String content) {
         return content.contains("java.io.File") || content.contains("java.nio.file");
     }

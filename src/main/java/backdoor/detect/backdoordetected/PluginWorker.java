@@ -30,7 +30,6 @@ public class PluginWorker implements Runnable {
     private static final int MAX_PROMPT_LENGTH = 262144;
     private final CodeAnalyzer codeAnalyzer;
 
-    // Wrapper class for Gemini API response
     private static class GeminiResponse {
         final JSONObject json;
         final int statusCode;
@@ -156,7 +155,6 @@ public class PluginWorker implements Runnable {
             final int currentBatchNum = batchNum++;
             final int totalBatches = batches.size();
 
-            // Log the files being sent in this batch
             this.pluginInstance.getLogger().info("--> Preparing Batch " + currentBatchNum + "/" + totalBatches + " for Gemini with " + batch.size() + " file(s):");
             for (Path filePath : batch.keySet()) {
                 this.pluginInstance.getLogger().info("    - " + filePath.getFileName());
@@ -282,23 +280,23 @@ public class PluginWorker implements Runnable {
 
             GeminiResponse response = sendToGemini(prompt, apiKey, modelName);
             if (response.json != null) {
-                return response.json; // Success
+                return response.json;
             }
 
-            // Failure logic
+
             this.pluginInstance.getLogger().warning("<-- Batch " + currentBatchNum + " attempt " + currentAttempt + " failed with status code " + response.statusCode);
 
             if (attempt < MAX_ATTEMPTS) {
                 long delay;
                 String reason;
                 if (response.statusCode == 429) {
-                    delay = 50000; // 50 seconds for rate limit
+                    delay = 50000;
                     reason = "API rate limit hit";
                 } else if (response.statusCode == 503) {
-                    delay = 50000; // 50 seconds for service unavailable
+                    delay = 50000;
                     reason = "API service unavailable (503)";
                 } else {
-                    delay = 5000; // 5 seconds for other errors
+                    delay = 5000;
                     reason = "API error";
                 }
                 final long finalDelaySec = delay / 1000;
@@ -310,7 +308,7 @@ public class PluginWorker implements Runnable {
                 runTaskOnMainThread(() -> sender.sendMessage("§c[" + apiInstanceName + "] Failed to analyze batch " + currentBatchNum + ". Please check server logs."));
             }
         }
-        return null; // All retries failed
+        return null;
     }
 
 
@@ -342,7 +340,6 @@ public class PluginWorker implements Runnable {
                     String errorResponse = errorReader.lines().collect(Collectors.joining());
                     this.pluginInstance.getLogger().warning("API Error Response: " + errorResponse);
                 } catch (Exception ex) {
-                    // Ignore if can't read error stream
                 }
                 return new GeminiResponse(null, statusCode);
             }
@@ -364,7 +361,7 @@ public class PluginWorker implements Runnable {
             }
         } catch (Exception e) {
             this.pluginInstance.getLogger().warning("Error sending to Gemini: " + e.getMessage());
-            return new GeminiResponse(null, -1); // -1 for internal plugin errors
+            return new GeminiResponse(null, -1);
         } finally {
             if (con != null) {
                 con.disconnect();
